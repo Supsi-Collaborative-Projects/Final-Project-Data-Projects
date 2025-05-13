@@ -7,58 +7,57 @@ output: html_notebook
 
 Dataset: <https://github.com/rfordatascience/tidytuesday/tree/main/data/2025/2025-01-21>
 
-## Import data and mange 
+## Introduction and problem setting
+
+This project is based on the “Himalayan Database”, a detailed collection of all documented expeditions to the Nepalese Himalayas since 1905. In particular, we will analyse data on expeditions from 2010 onwards, in order to understand the factors influencing the success or failure of recent mountaineering missions.
+
+The main objective is to explore what factors influence the outcome of an expedition. Some key questions:
+
+-   Which seasons have the highest probability of success?
+
+-   Has the reason for ending an expedition changed in recent years?
+
+-   Are there differences between expeditions led from Nepal, China or India?
+
+-   Are there countries that are more present and more successful?
+
+-   How much does the use of supplementary oxygen influence success?
+
+## Import data and cleaning
 
 ```{r}
 ################################################################################
 ### Cleaning data from the Himalayan Database ##################################
 ################################################################################
 
+
 library(tidyverse)
 library(foreign)
-library(janitor)
 library(httr)
-library(glue)
 library(zip)
 
-###_____________________________________________________________________________
-### Utilize httr and foreign to gain access to the file and import
-###_____________________________________________________________________________
+Sys.setlocale("LC_ALL", "C")  # resolve encoding problem
 
-# Step 1: Set up the URL and file paths
+# Step 1: Setup URL 
 url <- "https://www.himalayandatabase.com/downloads/Himalayan%20Database.zip"
 zip_file <- tempfile(fileext = ".zip")
 extracted_dir <- tempfile()
 
-# Step 2: Download the ZIP file
-httr::GET(url, httr::write_disk(zip_file, overwrite = TRUE))
+# Step 2: download ZIP and exctract
+GET(url, write_disk(zip_file, overwrite = TRUE))
+unzip(zip_file, exdir = extracted_dir)
 
-# Step 3: Extract the ZIP file
-zip::unzip(zip_file, exdir = extracted_dir)
-
-# Test to confirm the extracted contents
-list.files(extracted_dir, recursive = TRUE)
-
-# Step 4: Locate the peaks.DBF and exped.DBP files
 dbf_file_peaks <- file.path(extracted_dir, "Himalayan Database", "HIMDATA", "peaks.DBF")
 dbf_file_exped <- file.path(extracted_dir, "Himalayan Database", "HIMDATA", "exped.DBF")
-print(dbf_file_peaks) # Debugging: Verify the file path
-print(dbf_file_exped) # Debugging: Verify the file path
 
-# Step 5: Read the .DBF files using the `foreign` package
-peaks_data <- foreign::read.dbf(dbf_file_peaks, as.is = F)
-exped_data <- foreign::read.dbf(dbf_file_exped, as.is = F)
+# Step 5: read DBF and ignore warnings (already verified it)
+peaks_data <- suppressWarnings(read.dbf(dbf_file_peaks, as.is = TRUE))
+exped_data <- suppressWarnings(read.dbf(dbf_file_exped, as.is = TRUE))
 
-# Step 6: Convert the data to a tidy tibble
-peaks_temp <- tibble::as_tibble(peaks_data)
-exped_temp <- tibble::as_tibble(exped_data)
+# Step 6: convert into Tibble
+peaks_temp <- as_tibble(peaks_data)
+exped_temp <- as_tibble(exped_data)
 
-# Preview the data
-# originally there but we don't need that
-# glimpse(peaks_temp)
-# glimpse(exped_temp)
-
-# Clean up temporary files (optional)
 unlink(c(zip_file, extracted_dir), recursive = TRUE)
 ```
 
@@ -172,6 +171,106 @@ exped_tidy <- exped_temp |>
 ```
 
 ```{r}
+# not clean dataset
 dim(exped_temp)
+# clean dataset
 dim(exped_tidy)
 ```
+
+## Data Exploration (EDA)
+
+Information about the dataset
+
+```{r}
+glimpse(exped_tidy)
+```
+
+```{r}
+# missing values for each column
+missing_counts <- colSums(is.na(exped_tidy))
+missing_counts[missing_counts > 0]
+
+```
+
+```{r}
+# number of expedition by year
+library(ggplot2)
+ggplot(exped_tidy, aes(x = YEAR)) +
+  geom_bar() +
+  labs(title = "Number of expedition by year", x = "year", y = "n")
+```
+
+```{r}
+ggplot(exped_tidy, aes(x = SEASON_FACTOR)) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Distribution of expeditions per season", x = "Season", y = "Count")
+
+```
+
+```{r}
+# Distribution by host
+exped_tidy |> count(HOST_FACTOR) |> ggplot(aes(x = HOST_FACTOR, y = n)) +
+  geom_bar(stat = "identity") + labs(title = "Distribution by host", x = "Host", y = "expedition")
+```
+
+```{r}
+# expedition duration days
+ggplot(exped_tidy, aes(x = TOTDAYS)) + 
+  geom_histogram(bins = 30) + 
+  labs(title = "Distribution of total days", x = "days", y = "freq")
+
+# totals member
+ggplot(exped_tidy, aes(x = TOTMEMBERS)) + 
+  geom_histogram(bins = 30) + 
+  labs(title = "Distribution of number of members", x = "tot members", y = "freq")
+```
+
+```{r}
+# Success per season
+exped_tidy |> 
+ mutate(success = ifelse(SUCCESS1, "Success", "Failure")) |> 
+  count(SEASON_FACTOR, success) |> 
+ ggplot(aes(x = SEASON_FACTOR, y = n, fill = success)) +
+ geom_bar(stat = "identity", position = "dodge") +
+ labs(title = "Successes and Failures by Season", x = "Season", y = "Number", fill = "Outcome")
+```
+
+```{r}
+# Oxygen and success
+exped_tidy |> 
+ mutate(O2_USED = ifelse(O2USED, "O2 Used", "No O2")) |> 
+ mutate(success = ifelse(SUCCESS1, "Success", "Failure")) |> 
+  count(O2_USED, success) |> 
+  ggplot(aes(x = O2_USED, y = n, fill = success)) +
+ geom_bar(stat = "identity", position = "dodge") +
+ labs(title = "Success in relation to Oxygen", x = "Oxygen", y = "Number", fill = "Result")
+
+```
+
+```{r}
+library(GGally)
+exped_tidy_num <- exped_tidy |> select(TOTDAYS, SMTDAYS, TOTMEMBERS, SMTMEMBERS, HIGHPOINT)
+GGally::ggpairs(exped_tidy_num)
+
+```
+
+```{r}
+# Boxplot giorni
+ggplot(exped_tidy, aes(y = TOTDAYS)) + 
+  geom_boxplot() + 
+  labs(title = "Outliers in the total expedition days", y = "tot days")
+
+```
+
+```{r}
+
+# outliers in members
+exped_tidy |> filter(TOTMEMBERS > 30) |> select(EXPID, TOTMEMBERS)
+```
+
+```         
+```
+
+## Modeling
+
+## Conclusion
