@@ -23,7 +23,7 @@ The main objective is to explore what factors influence the outcome of an expedi
 
 -   How much does the use of supplementary oxygen influence success?
 
-## Import data and cleaning
+## Import data
 
 ```{r}
 ################################################################################
@@ -35,6 +35,8 @@ library(tidyverse)
 library(foreign)
 library(httr)
 library(zip)
+library(ggcorrplot)
+library(formattable)
 
 Sys.setlocale("LC_ALL", "C")  # resolve encoding problem
 
@@ -134,7 +136,7 @@ peaks_tidy <- peaks_temp |>
 ```{r}
 exped_tidy <- exped_temp |> 
   dplyr::mutate(YEAR = as.numeric(trimws(YEAR))) |> 
-  dplyr::filter(YEAR >= 2010) |> 
+  dplyr::filter(YEAR >= 2000) |> 
   dplyr::mutate(SEASON_FACTOR = case_when(
     SEASON == 0 ~ "Unknown",
     SEASON == 1 ~ "Spring",
@@ -177,31 +179,360 @@ dim(exped_temp)
 dim(exped_tidy)
 ```
 
+```{r}
+# clean dataset
+dim(peaks_tidy)
+```
+
+```{r}
+head(exped_tidy)
+```
+
+```{r}
+head(peaks_tidy)
+```
+
+```{r}
+ggplot(exped_temp, aes(x = as.numeric(YEAR))) +
+  geom_bar() +
+  scale_x_continuous(
+    breaks = seq(
+      from = min(as.numeric(exped_temp$YEAR), na.rm = TRUE),
+      to = max(as.numeric(exped_temp$YEAR), na.rm = TRUE),
+      by = 20
+    )
+  ) +
+  labs(
+    title = "Number of Expeditions per Year",
+    x = "Year",
+    y = "Number of Expeditions"
+  ) +
+  theme_minimal()
+
+```
+
+## Data Cleaning
+
+PEAK_TIDY DATASET DESCRIPTION
+
+| Variable | Class | Description |
+|-------------|-------------|----------------------------------------------|
+| PEAKID | integer | Peak ID, the key field (unique identifier) for each record. |
+| PKNAME | integer | Peak name. |
+| PKNAME2 | integer | Peak name 2. |
+| LOCATION | integer | Location of the peak. |
+| HEIGHTM | integer | Peak height in meters. |
+| HEIGHTF | integer | Peak height in feet. |
+| HIMAL | integer | Mountain range identifier. See HIMAL_FACTOR for names. |
+| HIMAL_FACTOR | integer | Mountain range name. |
+| REGION | integer | Region identifier. |
+| REGION_FACTOR | character | Region name. |
+| OPEN | logical | Indicates whether the peak is open for expeditions. |
+| UNLISTED | logical | Indicates whether the peak is unlisted in official records. |
+| TREKKING | logical | Indicates whether the peak is a trekking peak. |
+| TREKYEAR | integer | Year the peak was designated as a trekking peak. |
+| RESTRICT | logical | Indicates whether the peak is restricted for climbing or access. |
+| PHOST | integer | Primary host country identifier for the peak. See PHOST_FACTOR for names. |
+| PHOST_FACTOR | character | Primary host country name corresponding to the PHOST identifier. |
+| PSTATUS | integer | Climbing status identifier for the peak. See PSTATUS_FACTOR for names. |
+| PSTATUS_FACTOR | character | Climbing status description corresponding to the PSTATUS identifier. |
+| PEAKMEMO | character | Additional notes or remarks about the peak. |
+| PYEAR | integer | Year of the first recorded climbing attempt on the peak. |
+| PSEASON | character | Climbing season associated with the first recorded ascent or expedition. |
+| PEXPID | integer | Expedition ID associated with the first recorded climb. |
+| PSMTDATE | character | Date of the first successful summit. |
+| PCOUNTRY | character | Country of origin for the expedition or climbers. |
+| PSUMMITERS | integer | Number of climbers who first reached the summit. |
+| PSMTNOTE | character | Notes or remarks related to the first successful summit. |
+| REFERMEMO | character | Peak chronology references. |
+| PHOTOMEMO | character | Peak photo references. |
+
+EXPED_TIDY DATASET DESCRIPTION
+
+| Variable | Class | Description |
+|--------------|--------------|---------------------------------------------|
+| EXPID | factor | Expedition ID. |
+| PEAKID | factor | Peak ID. |
+| YEAR | factor | Year of the expedition. |
+| SEASON | integer | Season of the expedition as an integer. |
+| SEASON_FACTOR | character | Season of the expedition converted to a descriptive name. |
+| HOST | integer | Host country of the expedition as an integer. |
+| HOST_FACTOR | character | Host country of the expedition converted to a descriptive name. |
+| ROUTE1 | factor | Climbing route 1. |
+| ROUTE2 | factor | Climbing route 2. |
+| ROUTE3 | factor | Climbing route 3. |
+| ROUTE4 | factor | Climbing route 4. |
+| NATION | factor | Principal nationality. |
+| LEADERS | factor | Leadership of the expedition. |
+| SPONSOR | factor | Expedition sponsor / name. |
+| SUCCESS1 | logical | Success on route 1? |
+| SUCCESS2 | logical | Success on route 2? |
+| SUCCESS3 | logical | Success on route 3? |
+| SUCCESS4 | logical | Success on route 4? |
+| ASCENT1 | factor | Ascent numbers for route 1. |
+| ASCENT2 | factor | Ascent numbers for route 2. |
+| ASCENT3 | factor | Ascent numbers for route 3. |
+| ASCENT4 | factor | Ascent numbers for route 4. |
+| CLAIMED | logical | Success claimed? |
+| DISPUTED | logical | Success disputed? |
+| COUNTRIES | factor | Other countries. |
+| APPROACH | factor | Approach march. |
+| BCDATE | date | Date arrived at base camp. |
+| SMTDATE | date | Date reached summit. |
+| SMTTIME | factor | Time reached summit. |
+| SMTDAYS | integer | Number of days to summit / high-point. |
+| TOTDAYS | integer | Total number of days. |
+| TERMDATE | date | Date the expedition was terminated. |
+| TERMREASON | integer | Reason the expedition was terminated as an integer. |
+| TERMREASON_FACTOR | character | Reason the expedition was terminated converted to a descriptive name. |
+| TERMNOTE | factor | Termination details. |
+| HIGHPOINT | integer | Expedition high-point. |
+| TRAVERSE | logical | Did the expedition traverse. |
+| SKI | logical | Ski / snowboard descent? |
+| PARAPENTE | logical | Parapente descent? |
+| CAMPS | integer | Number of high camps above base camp. |
+| ROPE | integer | Amount of fixed rope. |
+| TOTMEMBERS | integer | Number of members. |
+| SMTMEMBERS | integer | Number of members on summit. |
+| MDEATHS | integer | Number of member deaths. |
+| TOTHIRED | integer | Number of hired personnel (above base camp). |
+| SMTHIRED | integer | Number of hired personnel on summit. |
+| HDEATHS | integer | Number of hired personnel deaths. |
+| NOHIRED | logical | No hired personnel used above base camp. |
+| O2USED | logical | Oxygen used? |
+| O2NONE | logical | Oxygen not used? |
+| O2CLIMB | logical | Oxygen climbing? |
+| O2DESCENT | logical | Oxygen descending? |
+| O2SLEEP | logical | Oxygen sleeping? |
+| O2MEDICAL | logical | Oxygen used medically? |
+| O2TAKEN | logical | Oxygen taken, not used? |
+| O2UNKWN | logical | Oxygen use unknown? |
+| OTHERSMTS | factor | Other summits. |
+| CAMPSITES | factor | Campsite details. |
+| ROUTEMEMO | factor | Route details. |
+| ACCIDENTS | factor | Accidents on the expedition. |
+| ACHIEVMENT | factor | Achievements. |
+| AGENCY | factor | Trekking agency. |
+| COMRTE | logical | Commercial route? |
+| STDRTE | logical | 8000m standard route? |
+| PRIMRTE | logical | Route info with primary expedition? |
+| PRIMMEM | logical | Member info with primary expedition? |
+| PRIMREF | logical | Literature info with primary expedition? |
+| PRIMID | factor | Primary expedition ID (if any). |
+| CHKSUM | integer | Internal consistency check. |
+
+### Handling NaN
+
+At he moment the data contain a lot of NaN, I want to check If exist some columns that are principaly composed of missing values, if exists, we will remove them
+
+```{r}
+# 1. Compute % missing per column
+miss_pct <- exped_tidy %>% 
+  summarise_all(~ mean(is.na(.)) * 100) %>% 
+  pivot_longer(everything(), names_to = "variable", values_to = "pct_missing")
+
+# 2. Filter for columns with > 0% missing values
+miss_pct_filtered <- miss_pct %>% 
+  filter(pct_missing > 0)
+
+# 3. Plot
+miss_pct_filtered %>% 
+  ggplot(aes(x = pct_missing, y = fct_reorder(variable, pct_missing))) +
+  geom_col() +
+  labs(
+    x = "% missing",
+    y = NULL,
+    title = "Missing values per variable in exped_tidy (only > 0%)"
+  ) +
+  scale_x_continuous(expand = expansion(mult = c(0, .05)))
+
+```
+
+```{r}
+missing_pct <- round(colSums(is.na(exped_tidy)) / nrow(exped_tidy) * 100, 2)
+missing_df <- data.frame(Column = names(missing_pct), MissingPercentage = missing_pct)
+
+# Create a color-scaled table
+formattable(
+  missing_df[order(-missing_df$MissingPercentage), ],
+  list(
+    MissingPercentage = color_tile("white", "red")
+  )
+)
+```
+
+Now we are doing the same for the dataset peaks_tidy
+
+```{r}
+# 1. Compute % missing per column
+miss_pct <- peaks_tidy %>% 
+  summarise_all(~ mean(is.na(.)) * 100) %>% 
+  pivot_longer(everything(), names_to = "variable", values_to = "pct_missing")
+
+# 2. Filter for columns with > 0% missing values
+miss_pct_filtered <- miss_pct %>% 
+  filter(pct_missing > 0)
+
+# 3. Plot
+miss_pct_filtered %>% 
+  ggplot(aes(x = pct_missing, y = fct_reorder(variable, pct_missing))) +
+  geom_col() +
+  labs(
+    x = "% missing",
+    y = NULL,
+    title = "Missing values per variable in peaks_tidy (only > 0%)"
+  ) +
+  scale_x_continuous(expand = expansion(mult = c(0, .05)))
+```
+
+```{r}
+missing_pct <- round(colSums(is.na(peaks_tidy)) / nrow(peaks_tidy) * 100, 2)
+missing_df <- data.frame(Column = names(missing_pct), MissingPercentage = missing_pct)
+
+# Create a color-scaled table
+formattable(
+  missing_df[order(-missing_df$MissingPercentage), ],
+  list(
+    MissingPercentage = color_tile("white", "red")
+  )
+)
+```
+
+#### 🔴 Very High NA% (over 40%)
+
+These columns have extremely high missing rates and are usually not useful unless they're absolutely critical:
+
+-   `ASCENT3` 100.00%
+
+-   `ASCENT4` 100.00%
+
+-   `ROUTE4` 99.99%
+
+-   `ROUTE3` 99.87%
+
+-   `ASCENT2` 99.77%
+
+-   `ROUTE2` 98.17%
+
+-   `PRIMID` 95.32%
+
+-   `ACHIEVMENT` 93.69%
+
+-   `ASCENT1` 86.54%
+
+-   `OTHERSMTS` 83.09%
+
+-   `TERMNOTE` 62.30%
+
+-   `COUNTRIES` 61.97%
+
+-   `SMTTIME` 50.39%
+
+-   `APPROACH` 45.40%
+
+-   `REFERMEMO` 96.04%
+
+-   `TREKYEAR` 93.96%
+
+-   `PSMTNOTE` 84.17%
+
+-   `PHOTOMEMO` 83.75%
+
+-   `PKNAME2` 46.46%
+
+-   `RESTRICT` 42.71%
+
+We decided to drop all this columns because of the first analysis of the NaN values
+
+```{r}
+cols_to_drop_exped <- c(
+  "ASCENT3", "ASCENT4", "ROUTE4", "ROUTE3", "ASCENT2", "ROUTE2", "PRIMID", "ACHIEVMENT",
+  "ASCENT1", "OTHERSMTS", "TERMNOTE", "COUNTRIES", "SMTTIME", "APPROACH"
+)
+
+exped_tidy <- exped_tidy |> dplyr::select(-all_of(cols_to_drop_exped))
+
+cols_to_drop_peaks <- c(
+  "REFERMEMO", "TREKYEAR", "PSMTNOTE", "PHOTOMEMO", "PKNAME2", "RESTRICT"
+)
+
+peaks_tidy <- peaks_tidy |> dplyr::select(-all_of(cols_to_drop_peaks))
+
+```
+
+Duplicates:
+
+```{r}
+duplicated_rows_exped <- exped_tidy[duplicated(exped_tidy), ]
+duplicated_rows_peaks <- peaks_tidy[duplicated(peaks_tidy), ]
+nrow(duplicated_rows_exped)
+nrow(duplicated_rows_peaks)
+```
+
+Join the two datasets
+
+```{r}
+exped_full <- exped_tidy |> 
+  left_join(peaks_tidy, by = "PEAKID")
+```
+
 ## Data Exploration (EDA)
 
-Information about the dataset
+Information about the
+
+Overview of the dataset and the features
 
 ```{r}
-glimpse(exped_tidy)
+sapply(exped_full, class) |> table()
 ```
 
 ```{r}
-# missing values for each column
-missing_counts <- colSums(is.na(exped_tidy))
-missing_counts[missing_counts > 0]
+sapply(exped_full, class) |> sort()
+
+```
+
+Analysis of the numerical features:
+
+```{r}
+numeric_vars <- names(exped_tidy)[sapply(exped_tidy, is.numeric)]
+print(numeric_vars)
 
 ```
 
 ```{r}
-# number of expedition by year
-library(ggplot2)
-ggplot(exped_tidy, aes(x = YEAR)) +
-  geom_bar() +
-  labs(title = "Number of expedition by year", x = "year", y = "n")
+for (var in numeric_vars) {
+  print(
+    ggplot(exped_tidy, aes(x = .data[[var]])) +
+      geom_histogram(bins = 30, fill = "steelblue", color = "white") +
+      labs(title = paste("Distribution of", var), x = var, y = "Frequency")
+  )
+}
 ```
 
 ```{r}
-ggplot(exped_tidy, aes(x = SEASON_FACTOR)) +
+cor_matrix <- exped_full |> 
+  dplyr::select(all_of(numeric_vars)) |> 
+  cor(use = "complete.obs")
+
+library(ggcorrplot)
+ggcorrplot::ggcorrplot(cor_matrix, lab = TRUE, lab_size = 3)
+```
+
+```{r}
+library(GGally)
+exped_full_num <- exped_full |> select(TOTDAYS, SMTDAYS, TOTMEMBERS, SMTMEMBERS, HIGHPOINT)
+GGally::ggpairs(exped_full_num)
+```
+
+```{r}
+categorical_vars <- names(exped_full)[sapply(exped_full, function(x) is.character(x) || is.factor(x))]
+
+print(categorical_vars)
+
+```
+
+```{r}
+ggplot(exped_full, aes(x = SEASON_FACTOR)) +
   geom_bar(fill = "steelblue") +
   labs(title = "Distribution of expeditions per season", x = "Season", y = "Count")
 
@@ -209,20 +540,8 @@ ggplot(exped_tidy, aes(x = SEASON_FACTOR)) +
 
 ```{r}
 # Distribution by host
-exped_tidy |> count(HOST_FACTOR) |> ggplot(aes(x = HOST_FACTOR, y = n)) +
+exped_full |> count(HOST_FACTOR) |> ggplot(aes(x = HOST_FACTOR, y = n)) +
   geom_bar(stat = "identity") + labs(title = "Distribution by host", x = "Host", y = "expedition")
-```
-
-```{r}
-# expedition duration days
-ggplot(exped_tidy, aes(x = TOTDAYS)) + 
-  geom_histogram(bins = 30) + 
-  labs(title = "Distribution of total days", x = "days", y = "freq")
-
-# totals member
-ggplot(exped_tidy, aes(x = TOTMEMBERS)) + 
-  geom_histogram(bins = 30) + 
-  labs(title = "Distribution of number of members", x = "tot members", y = "freq")
 ```
 
 ```{r}
@@ -244,13 +563,6 @@ exped_tidy |>
   ggplot(aes(x = O2_USED, y = n, fill = success)) +
  geom_bar(stat = "identity", position = "dodge") +
  labs(title = "Success in relation to Oxygen", x = "Oxygen", y = "Number", fill = "Result")
-
-```
-
-```{r}
-library(GGally)
-exped_tidy_num <- exped_tidy |> select(TOTDAYS, SMTDAYS, TOTMEMBERS, SMTMEMBERS, HIGHPOINT)
-GGally::ggpairs(exped_tidy_num)
 
 ```
 
