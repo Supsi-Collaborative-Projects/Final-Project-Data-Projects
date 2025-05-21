@@ -5,6 +5,8 @@ output: html_notebook
 
 # Final project Data Projects & Hackathon 2
 
+# Exploring Mountaineering Success in the Himalayas: An Analysis of Recent Expeditions (2000–2025)
+
 Dataset: <https://github.com/rfordatascience/tidytuesday/tree/main/data/2025/2025-01-21>
 
 ## Introduction and problem setting
@@ -13,15 +15,21 @@ This project is based on the “Himalayan Database”, a detailed collection of 
 
 The main objective is to explore what factors influence the outcome of an expedition. Some key questions:
 
--   Which seasons have the highest probability of success?
+-   Does the use of supplementary oxygen reduce the duration of expeditions?
 
--   Has the reason for ending an expedition changed in recent years?
+-   Which features help expeditions reach the summit?
 
--   Are there differences between expeditions led from Nepal, China or India?
+-   
 
--   Are there countries that are more present and more successful?
+-   Does the use of supplementary oxygen increase the probability of success?
 
--   How much does the use of supplementary oxygen influence success?
+-   Are expeditions led by Nepal, China or India more likely to succeed?
+
+These questions are particularly relevant given the rich structure of the dataset.
+
+Understanding the role of **oxygen usage** can help assess both its practical value and potential risks in high-altitude climbing. Analyzing **altitude** and **duration** relationships provides insight into how physical challenges scale with mountain difficulty. Seasonal variation is a classic factor in expedition planning, and quantifying its impact on success rates can inform safer scheduling. Finally, exploring **leadership origin** may reflect differences in strategy, experience, or logistical capacity across countries, revealing potential cultural or regional patterns in expedition outcomes.
+
+These questions are not only statistically approachable through regression models, but also contextually meaningful for both mountaineering professionals and enthusiasts.
 
 ## Import data
 
@@ -37,6 +45,7 @@ library(httr)
 library(zip)
 library(ggcorrplot)
 library(formattable)
+library(VIM)
 
 Sys.setlocale("LC_ALL", "C")  # resolve encoding problem
 
@@ -211,12 +220,28 @@ ggplot(exped_temp, aes(x = as.numeric(YEAR))) +
 
 ```
 
-## Data Cleaning
+## Data Cleaning and Preprocessing
+
+The dataset we will use at the end of the data cleaning and preprocessing is a **merged version** of the peaks_tidy and exped_tidy datasets, filtered to include only expeditions from the year 2000 onwards. The main steps of cleaning included:
+
+-    A detailed **description of available features**, distinguishing between numeric, categorical, and logical variables.
+
+-   Handling of missing values:
+
+    -   **Features with more than 40% missing values were discarded**.
+
+    -    For the remaining ones, missing values are being addressed through appropriate **data imputation techniques** (to be finalized, e.g., median/mode for numerical/categorical, or domain-specific strategies).
+
+    Planned additions:
+
+    -    Identify and address duplicate entries.
+
+    -   Standardize categorical levels (e.g., for country names, reasons for termination, etc.).
 
 PEAK_TIDY DATASET DESCRIPTION
 
 | Variable | Class | Description |
-|-------------|-------------|----------------------------------------------|
+|---------------|---------------|------------------------------------------|
 | PEAKID | integer | Peak ID, the key field (unique identifier) for each record. |
 | PKNAME | integer | Peak name. |
 | PKNAME2 | integer | Peak name 2. |
@@ -250,7 +275,7 @@ PEAK_TIDY DATASET DESCRIPTION
 EXPED_TIDY DATASET DESCRIPTION
 
 | Variable | Class | Description |
-|--------------|--------------|---------------------------------------------|
+|----------------|----------------|-----------------------------------------|
 | EXPID | factor | Expedition ID. |
 | PEAKID | factor | Peak ID. |
 | YEAR | factor | Year of the expedition. |
@@ -460,7 +485,159 @@ peaks_tidy <- peaks_tidy |> dplyr::select(-all_of(cols_to_drop_peaks))
 
 ```
 
-Duplicates:
+### Handling features that aren't informative
+
+After handling columns with excessive missing values, we proceed to remove additional variables that are not informative for modeling or analysis.
+
+These columns fall into one or more of the following categories: -
+
+-   Descriptive text fields (e.g., notes, comments, or memos) that are unique and not analytically useful
+
+-    Redundant variables where a clearer human-readable factor version already exists
+
+-   High-cardinality identifiers (e.g., names or sponsors) that are not relevant to our research questions
+
+This step is crucial to reduce noise, avoid overfitting in machine learning models, and simplify our dataset for exploration and modeling.
+
+```{r}
+# Count unique values per column
+unique_counts <- sapply(exped_tidy, function(x) length(unique(x)))
+
+# Sort descending
+sort(unique_counts, decreasing = TRUE)
+```
+
+```{r}
+columns_to_drop_peaks <- c(
+  "PKNAME2", "HEIGHTF", "HIMAL_FACTOR", "REGION_FACTOR", "OPEN",
+  "UNLISTED", "TREKKING", "TREKYEAR", "RESTRICT", "PHOST_FACTOR",
+  "PSTATUS_FACTOR", "PEAKMEMO", "PYEAR", "PSEASON", "PEXPID",
+  "PSMTDATE", "PCOUNTRY", "PSUMMITERS", "PSMTNOTE", "REFERMEMO",
+  "PHOTOMEMO"
+)
+
+columns_to_drop_exped <- c(
+  "SEASON_FACTOR", "HOST_FACTOR", "SPONSOR", "ASCENT1", "ASCENT2", "ASCENT3", "ASCENT4", "APPROACH", "TERMREASON_FACTOR", "TERMNOTE", "SKI", "PARAPENTE", "O2NONE", ,"CAMPSITES", "ROUTEMEMO","ACHIEVMENT", "PRIMRTE", "PRIMMEM", "PRIMREF", "PRIMID", "CHKSUM", "ACCIDENTS", "AGENCY", "OTHERSMTS", "LEADERS", "NATION", "COUNTRIES"
+)
+
+peaks_tidy <- peaks_tidy |> select(-any_of(columns_to_drop_peaks))
+
+exped_tidy <- exped_tidy |> select(-any_of(c(cols_text_exped, columns_to_drop_exped))
+
+```
+
+### Missing values imputation
+
+To ensure our dataset is complete and ready for modeling, we apply appropriate missing value imputation.
+
+Different strategies are used based on variable types:
+
+-    For numerical variables: we use median imputation to avoid distortion by outliers.
+
+-    For categorical variables: we impute with `"Missing"` or the most frequent category (mode). -
+
+-   For logical variables: missing values are assumed to be `FALSE` when safe, or flagged as `"Unknown"` where interpretation is unclear.
+
+This step ensures that we do not lose rows due to NAs during model fitting.
+
+```{r}
+# Imputation - exped_tidy
+numeric_vars_exped <- names(exped_tidy)[sapply(exped_tidy, is.numeric)]
+exped_numeric <- exped_tidy[, numeric_vars_exped]
+
+# KNN Imputation for numeric vars
+exped_numeric_imputed <- kNN(exped_numeric, k = 5, imp_var = FALSE)
+exped_tidy[numeric_vars_exped] <- exped_numeric_imputed
+
+# Categorical
+cat_vars_exped <- names(exped_tidy)[sapply(exped_tidy, function(x) is.character(x) || is.factor(x))]
+for (col in cat_vars_exped) {
+  exped_tidy[[col]] <- as.character(exped_tidy[[col]])
+  exped_tidy[[col]][is.na(exped_tidy[[col]])] <- "Missing"
+  exped_tidy[[col]] <- as.factor(exped_tidy[[col]])
+}
+
+# Logical
+log_vars_exped <- names(exped_tidy)[sapply(exped_tidy, is.logical)]
+for (col in log_vars_exped) {
+  exped_tidy[[col]][is.na(exped_tidy[[col]])] <- FALSE
+}
+```
+
+```{r}
+# Imputation - peaks_tidy
+numeric_vars_peaks <- names(peaks_tidy)[sapply(peaks_tidy, is.numeric)]
+peaks_numeric <- peaks_tidy[, numeric_vars_peaks]
+
+# KNN Imputation
+peaks_numeric_imputed <- kNN(peaks_numeric, k = 5, imp_var = FALSE)
+peaks_tidy[numeric_vars_peaks] <- peaks_numeric_imputed
+
+# Categorical
+cat_vars_peaks <- names(peaks_tidy)[sapply(peaks_tidy, function(x) is.character(x) || is.factor(x))]
+for (col in cat_vars_peaks) {
+  peaks_tidy[[col]] <- as.character(peaks_tidy[[col]])
+  peaks_tidy[[col]][is.na(peaks_tidy[[col]])] <- "Missing"
+  peaks_tidy[[col]] <- as.factor(peaks_tidy[[col]])
+}
+
+# Logical
+log_vars_peaks <- names(peaks_tidy)[sapply(peaks_tidy, is.logical)]
+for (col in log_vars_peaks) {
+  peaks_tidy[[col]][is.na(peaks_tidy[[col]])] <- FALSE
+}
+```
+
+```{r}
+sum(is.na(exped_tidy)) 
+sum(is.na(peaks_tidy))   
+```
+
+Every imputation where done correctly, but we have still some missing datas. So let's explore it again
+
+```{r}
+na_counts <- colSums(is.na(exped_tidy))
+na_counts[na_counts > 0]
+```
+
+```{r}
+library(lubridate)
+
+exped_tidy <- exped_tidy |> mutate(
+  DAYS_TO_END = as.numeric(TERMDATE - BCDATE),
+  DAY_OF_YEAR_START = yday(BCDATE)
+)
+```
+
+```{r}
+exped_tidy <- exped_tidy |> select(-BCDATE, -SMTDATE, -TERMDATE)
+```
+
+```{r}
+colSums(is.na(exped_tidy[c("DAYS_TO_END", "DAY_OF_YEAR_START")]))
+
+# Imputation con KNN se necessario
+
+to_impute <- exped_tidy[, c("DAYS_TO_END", "DAY_OF_YEAR_START")]
+to_impute_knn <- kNN(to_impute, k = 5, imp_var = FALSE)
+exped_tidy[, c("DAYS_TO_END", "DAY_OF_YEAR_START")] <- to_impute_knn
+```
+
+```{r}
+# Now should be both 0
+sum(is.na(exped_tidy)) 
+sum(is.na(peaks_tidy))   
+```
+
+We transformed date fields into numeric variables to preserve meaningful temporal information while making them usable in modeling. Specifically, we computed:
+
+-   `DAYS_TO_END`: days from base camp arrival to expedition termination
+
+-   `DAY_OF_YEAR_START`: expedition start day of the year
+
+We removed the original date columns and applied KNN imputation (k = 5) on the derived variables to handle remaining missing values.
+
+### Duplicates
 
 ```{r}
 duplicated_rows_exped <- exped_tidy[duplicated(exped_tidy), ]
@@ -469,14 +646,65 @@ nrow(duplicated_rows_exped)
 nrow(duplicated_rows_peaks)
 ```
 
-Join the two datasets
+### Join the two datasets
 
 ```{r}
 exped_full <- exped_tidy |> 
   left_join(peaks_tidy, by = "PEAKID")
 ```
 
+### Encoding
+
+To make our dataset suitable for modeling, we encoded all categorical variables as factors. This allows R's linear and logistic regression functions (`lm()`, `glm()`) to automatically generate appropriate dummy variables internally.
+
+```{r}
+# Convert character columns to factor
+exped_full <- exped_full |> mutate(
+  across(where(is.character), as.factor)
+)
+```
+
+```{r}
+# List categorical variables
+cat_vars <- names(exped_full)[sapply(exped_full, is.factor)]
+
+```
+
+### Scaling
+
+We applied standard scaling to all continuous numeric variables, transforming them to have a mean of 0 and a standard deviation of 1. This step is important for models like linear and logistic regression, where variables on very different scales can distort the estimation of coefficients.
+
+We excluded logical and categorical variables from this process.
+
+```{r}
+# Identify numeric variables (excluding logical)
+numeric_vars <- names(exped_full)[sapply(exped_full, is.numeric)]
+# Optionally exclude known binary numeric vars
+binary_like <- c("SUCCESS1", "O2USED", "O2NONE", "O2CLIMB", "O2DESCENT", "O2SLEEP", "O2MEDICAL", "O2TAKEN", "O2UNKWN", "NOHIRED")
+
+vars_to_scale <- setdiff(numeric_vars, binary_like)
+
+# Apply standard scaling (mean = 0, sd = 1)
+exped_full_scaled <- exped_full
+exped_full_scaled[vars_to_scale] <- scale(exped_full_scaled[vars_to_scale])
+
+# Check: mean should be ~0, sd ~1
+summary(exped_full_scaled[vars_to_scale])
+```
+
 ## Data Exploration (EDA)
+
+Currently underway:
+
+-    Summary statistics and distribution plots for **numerical features**.
+
+-   Planned analysis for:
+
+    -    **Categorical features** (e.g., country, season, termination reason)
+
+    -    **Logical features** (e.g., use of oxygen, success/failure).
+
+-    Exploratory visualizations to support modeling choices (e.g., boxplots, bar charts, correlation heatmaps).
 
 Information about the
 
@@ -580,9 +808,83 @@ ggplot(exped_tidy, aes(y = TOTDAYS)) +
 exped_tidy |> filter(TOTMEMBERS > 30) |> select(EXPID, TOTMEMBERS)
 ```
 
-```         
+## Modeling
+
+### Regression
+
+#### Does the use of supplementary oxygen reduce the duration of expeditions?
+
+We aim to understand whether the use of supplementary oxygen (`O2USED`) has a measurable impact on the total duration of Himalayan expeditions (`TOTDAYS`). This is a regression problem, where the response variable is continuous.
+
+The variable `O2USED` is binary (TRUE/FALSE), and our hypothesis is that expeditions using oxygen may be shorter due to improved endurance at altitude. Confirming this relationship can provide insight into the logistical and physiological effects of oxygen use.
+
+We will begin with exploratory inference, then fit a linear regression model.
+
+To statistically assess whether supplementary oxygen affects expedition duration, we test the following hypotheses:
+
+-   **Null hypothesis (H₀):** There is no difference in average expedition duration (`TOTDAYS`) between expeditions that used supplementary oxygen (`O2USED = TRUE`) and those that did not.
+-   **Alternative hypothesis (H₁):** Expeditions that used oxygen had a different average duration than those that did not.
+
+We perform a two-sample t-test: \`\`\`{r} t.test(TOTDAYS \~ O2USED, data = exped_tidy)
+
+Boxplot
+
+```{r}
+ggplot(exped_tidy, aes(x = O2USED, y = TOTDAYS)) +
+  geom_boxplot(fill = "skyblue") +
+  labs(title = "Duration of Expeditions by Oxygen Use",
+       x = "Supplementary Oxygen Used",
+       y = "Total Duration (days)") +
+  theme_minimal()
+
 ```
 
-## Modeling
+\+ summary stats +
+
+```{r}
+# Mean duration by oxygen use
+exped_tidy |>
+  group_by(O2USED) |>
+  summarise(
+    count = n(),
+    mean_days = mean(TOTDAYS),
+    sd_days = sd(TOTDAYS)
+  )
+```
+
+t-test
+
+```{r}
+# t-test
+t.test(TOTDAYS ~ O2USED, data = exped_tidy)
+```
+
+We model the total duration of expeditions (`TOTDAYS`) as a function of oxygen use (`O2USED`), using simple linear regression.
+
+This model helps quantify the expected change in duration when oxygen is used, holding all else constant. Since oxygen use is binary, the coefficient represents the average difference in days between the two groups.
+
+```{r}
+# Fit linear regression
+lm_oxy <- lm(TOTDAYS ~ O2USED, data = exped_tidy)
+
+# Summary of model
+summary(lm_oxy)
+```
+
+Residuals
+
+```{r}
+# Residual plots
+library(performance)
+check_model(lm_oxy)
+```
+
+The coefficient for `O2USED` represents the estimated average change in duration when oxygen is used.
+
+If the coefficient is negative and statistically significant (p \< 0.05), this suggests that expeditions using supplementary oxygen are shorter on average.
+
+We also assess the model’s R² value to determine how much of the variation in duration is explained by oxygen use alone. Since this is a simple model, we expect a relatively low R², which is acceptable for initial inference.
+
+The residual plots are used to check for any major violations of the linear model assumptions (homoscedasticity, normality of residuals).
 
 ## Conclusion
