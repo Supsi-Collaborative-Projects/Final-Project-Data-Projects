@@ -1,0 +1,563 @@
+---
+title: "Himalayan Expeditions: Analyzing Success and Risk in the World's Highest Mountains"
+author: "Paolo Nicolet, Alessandro Mecchia"
+output: html_document
+---
+
+# Final project Data Projects & Hackathon 2
+
+Dataset: <https://github.com/rfordatascience/tidytuesday/tree/main/data/2025/2025-01-21>
+
+## Import data and tidy conversion
+
+```{r}
+library(tidyverse)
+library(foreign)
+library(janitor)
+library(httr)
+library(glue)
+library(zip)
+library(ggplot2)
+library(infer)
+library(tidymodels)
+```
+
+```{r}
+################################################################################
+### Cleaning data from the Himalayan Database ##################################
+################################################################################
+
+###_____________________________________________________________________________
+### Utilize httr and foreign to gain access to the file and import
+###_____________________________________________________________________________
+
+# Step 1: Set up the URL and file paths
+url <- "https://www.himalayandatabase.com/downloads/Himalayan%20Database.zip"
+zip_file <- tempfile(fileext = ".zip")
+extracted_dir <- tempfile()
+
+# Step 2: Download the ZIP file
+httr::GET(url, httr::write_disk(zip_file, overwrite = TRUE))
+
+# Step 3: Extract the ZIP file
+zip::unzip(zip_file, exdir = extracted_dir)
+
+# Test to confirm the extracted contents
+list.files(extracted_dir, recursive = TRUE)
+
+# Step 4: Locate the peaks.DBF and exped.DBP files
+dbf_file_peaks <- file.path(extracted_dir, "Himalayan Database", "HIMDATA", "peaks.DBF")
+dbf_file_exped <- file.path(extracted_dir, "Himalayan Database", "HIMDATA", "exped.DBF")
+print(dbf_file_peaks) # Debugging: Verify the file path
+print(dbf_file_exped) # Debugging: Verify the file path
+
+# Step 5: Read the .DBF files using the `foreign` package
+suppressWarnings({
+  peaks_data <- foreign::read.dbf(dbf_file_peaks, as.is = F)
+  exped_data <- foreign::read.dbf(dbf_file_exped, as.is = F)
+})
+# Step 6: Convert the data to a tidy tibble
+peaks_temp <- tibble::as_tibble(peaks_data)
+exped_temp <- tibble::as_tibble(exped_data)
+
+# Preview the data
+# originally there but we don't need that
+# glimpse(peaks_temp)
+# glimpse(exped_temp)
+
+# Clean up temporary files (optional)
+unlink(c(zip_file, extracted_dir), recursive = TRUE)
+```
+
+```{r}
+###_____________________________________________________________________________
+### Add columns that recode some variables that are integers into character
+### strings that describe their subject in the peaks dataset
+###_____________________________________________________________________________
+
+peaks_tidy <- peaks_temp |> 
+  dplyr::mutate(HIMAL_FACTOR = case_when(
+    HIMAL == 0  ~ "Unclassified",
+    HIMAL == 1  ~ "Annapurna",
+    HIMAL == 2  ~ "Api/Byas Risi/Guras",
+    HIMAL == 3  ~ "Damodar",
+    HIMAL == 4  ~ "Dhaulagiri",
+    HIMAL == 5  ~ "Ganesh/Shringi",
+    HIMAL == 6  ~ "Janak/Ohmi Kangri",
+    HIMAL == 7  ~ "Jongsang",
+    HIMAL == 8  ~ "Jugal",
+    HIMAL == 9  ~ "Kangchenjunga/Simhalila",
+    HIMAL == 10 ~ "Kanjiroba",
+    HIMAL == 11 ~ "Kanti/Palchung",
+    HIMAL == 12 ~ "Khumbu",
+    HIMAL == 13 ~ "Langtang",
+    HIMAL == 14 ~ "Makalu",
+    HIMAL == 15 ~ "Manaslu/Mansiri",
+    HIMAL == 16 ~ "Mukut/Mustang",
+    HIMAL == 17 ~ "Nalakankar/Chandi/Changla",
+    HIMAL == 18 ~ "Peri",
+    HIMAL == 19 ~ "Rolwaling",
+    HIMAL == 20 ~ "Saipal",
+    TRUE ~ "Unknown" # Default case if a value doesn't match
+  ),
+  .after = HIMAL
+  ) |> 
+  mutate(REGION_FACTOR = case_when(
+    REGION == 0 ~ "Unclassified",
+    REGION == 1 ~ "Kangchenjunga-Janak",
+    REGION == 2 ~ "Khumbu-Rolwaling-Makalu",
+    REGION == 3 ~ "Langtang-Jugal",
+    REGION == 4 ~ "Manaslu-Ganesh",
+    REGION == 5 ~ "Annapurna-Damodar-Peri",
+    REGION == 6 ~ "Dhaulagiri-Mukut",
+    REGION == 7 ~ "Kanjiroba-Far West",
+    TRUE        ~ "Unknown" # Default case if a value doesn't match
+  ),
+  .after = REGION
+  ) |> 
+  mutate(PHOST_FACTOR = case_when(
+    PHOST == 0 ~ "Unclassified",
+    PHOST == 1 ~ "Nepal only",
+    PHOST == 2 ~ "China only",
+    PHOST == 3 ~ "India only",
+    PHOST == 4 ~ "Nepal & China",
+    PHOST == 5 ~ "Nepal & India",
+    PHOST == 6 ~ "Nepal, China & India",
+    TRUE       ~ "Unknown" # Default case if a value doesn't match
+  ),
+  .after = PHOST
+  ) |> 
+  mutate(PSTATUS_FACTOR = case_when(
+    PSTATUS == 0 ~ "Unknown",
+    PSTATUS == 1 ~ "Unclimbed",
+    PSTATUS == 2 ~ "Climbed",
+    TRUE         ~ "Invalid" # Default case if a value doesn't match
+  ),
+  .after = PSTATUS
+  ) |> 
+  mutate(across(c(HIMAL_FACTOR, PHOST_FACTOR, PSTATUS_FACTOR), ~ factor(.)))
+
+```
+
+```{r}
+exped_tidy <- exped_temp |> 
+  dplyr::mutate(YEAR = as.numeric(trimws(YEAR))) |> 
+  dplyr::filter(YEAR >= 2000) |> 
+  dplyr::mutate(SEASON_FACTOR = case_when(
+    SEASON == 0 ~ "Unknown",
+    SEASON == 1 ~ "Spring",
+    SEASON == 2 ~ "Summer",
+    SEASON == 3 ~ "Autumn",
+    SEASON == 4 ~ "Winter",
+    TRUE ~ NA_character_
+  ), .after = SEASON) |> 
+  dplyr::mutate(HOST_FACTOR = case_when(
+    HOST == 0 ~ "Unknown",
+    HOST == 1 ~ "Nepal",
+    HOST == 2 ~ "China",
+    HOST == 3 ~ "India",
+    TRUE ~ NA_character_
+  ), .after = HOST) |> 
+  dplyr::mutate(TERMREASON_FACTOR = case_when(
+    TERMREASON == 0 ~ "Unknown",
+    TERMREASON == 1 ~ "Success (main peak)",
+    TERMREASON == 2 ~ "Success (subpeak, foresummit)",
+    TERMREASON == 3 ~ "Success (claimed)",
+    TERMREASON == 4 ~ "Bad weather (storms, high winds)",
+    TERMREASON == 5 ~ "Bad conditions (deep snow, avalanching, falling ice, or rock)",
+    TERMREASON == 6 ~ "Accident (death or serious injury)",
+    TERMREASON == 7 ~ "Illness, AMS, exhaustion, or frostbite",
+    TERMREASON == 8 ~ "Lack (or loss) of supplies, support or equipment",
+    TERMREASON == 9 ~ "Lack of time",
+    TERMREASON == 10 ~ "Route technically too difficult, lack of experience, strength, or motivation",
+    TERMREASON == 11 ~ "Did not reach base camp",
+    TERMREASON == 12 ~ "Did not attempt climb",
+    TERMREASON == 13 ~ "Attempt rumored",
+    TERMREASON == 14 ~ "Other"
+  ), .after = TERMREASON)
+
+```
+
+```{r}
+dim(exped_temp)
+dim(exped_tidy)
+```
+
+```{r}
+view(peaks_tidy)
+view(exped_tidy)
+view(exped_temp)
+```
+
+```{r}
+ggplot(exped_temp, aes(x = YEAR)) +
+  geom_bar() +
+  scale_x_discrete(breaks = levels(exped_temp$YEAR)[as.numeric(levels(exped_temp$YEAR)) %% 10 == 0]) +
+  labs(title = "Number of Expeditions per Year",
+       x = "Year",
+       y = "Number of Expeditions") +
+  theme_minimal()
+```
+
+## Data Cleaning
+
+### Handling NaN
+
+At the moment the data contain a lot of NaN, I want to check If exist some columns that are principaly composed of missing values, if exists, we will remove them
+
+```{r}
+# 1. Compute % missing per column
+miss_pct <- exped_tidy %>% 
+  summarise_all(~ mean(is.na(.)) * 100) %>% 
+  pivot_longer(everything(), names_to = "variable", values_to = "pct_missing")
+
+# 2. Filter for columns with > 0% missing values
+miss_pct_filtered <- miss_pct %>% 
+  filter(pct_missing > 0)
+
+# 3. Plot
+miss_pct_filtered %>% 
+  ggplot(aes(x = pct_missing, y = fct_reorder(variable, pct_missing))) +
+  geom_col() +
+  labs(
+    x = "% missing",
+    y = NULL,
+    title = "Missing values per variable in exped_tidy (only > 0%)"
+  ) +
+  scale_x_continuous(expand = expansion(mult = c(0, .05)))
+
+
+```
+
+```{r}
+#round(colSums(is.na(peaks_tidy)) / nrow(peaks_tidy) * 100, 2)
+
+```
+
+```{r}
+# 1. Compute % missing per column
+miss_pct <- peaks_tidy %>% 
+  summarise_all(~ mean(is.na(.)) * 100) %>% 
+  pivot_longer(everything(), names_to = "variable", values_to = "pct_missing")
+
+# 2. Filter for columns with > 0% missing values
+miss_pct_filtered <- miss_pct %>% 
+  filter(pct_missing > 0)
+
+# 3. Plot
+miss_pct_filtered %>% 
+  ggplot(aes(x = pct_missing, y = fct_reorder(variable, pct_missing))) +
+  geom_col() +
+  labs(
+    x = "% missing",
+    y = NULL,
+    title = "Missing values per variable in peaks_tidy (only > 0%)"
+  ) +
+  scale_x_continuous(expand = expansion(mult = c(0, .05)))
+```
+
+```{r}
+miss_pct_filtered
+```
+
+| Feature        | Class     | Drop | Motivation if drop                 |
+|----------------|-----------|------|------------------------------------|
+| PEAKID         | integer   | No   |                                    |
+| PKNAME         | integer   | No   |                                    |
+| PKNAME2        | integer   | Yes  | 46.5% of Missing Values            |
+| LOCATION       | integer   | No   |                                    |
+| HEIGHTM        | integer   | No   |                                    |
+| HEIGHTF        | integer   | Yes  | We use meter, not feet             |
+| HIMAL          | integer   | No   |                                    |
+| HIMAL_FACTOR   | integer   | Yes  | Already encoded                    |
+| REGION         | integer   | No   |                                    |
+| REGION_FACTOR  | character | Yes  | Already encoded                    |
+| OPEN           | logical   | Yes  | Is not important for out reasearch |
+| UNLISTED       | logical   | Yes  |                                    |
+| TREKKING       | logical   | Yes  |                                    |
+| TREKYEAR       | integer   | Yes  | 93.9% of Missing Values            |
+| RESTRICT       | logical   | Yes  | 42.7 of Missing Values             |
+| PHOST          | integer   | No   |                                    |
+| PHOST_FACTOR   | character | Yes  | Already encoded                    |
+| PSTATUS        | integer   | No   |                                    |
+| PSTATUS_FACTOR | character | Yes  | Already encoded                    |
+| PEAKMEMO       | character | Yes  |                                    |
+| PYEAR          | integer   | Yes  |                                    |
+| PSEASON        | character | Yes  |                                    |
+| PEXPID         | integer   | Yes  |                                    |
+| PSMTDATE       | character | Yes  |                                    |
+| PCOUNTRY       | character | Yes  |                                    |
+| PSUMMITERS     | integer   | Yes  |                                    |
+| PSMTNOTE       | character | Yes  |                                    |
+| REFERMEMO      | character | Yes  |                                    |
+| PHOTOMEMO      | character | Yes  |                                    |
+
+```{r}
+peaks_tidy_clean <- peaks_tidy %>% 
+  select(-c(
+    PKNAME2,
+    HIMAL_FACTOR,
+    TREKYEAR,
+    RESTRICT,
+    PEAKMEMO,
+    PSEASON,
+    PEXPID,
+    PSMTDATE,
+    PCOUNTRY,
+    PSUMMITERS,
+    PSMTNOTE,
+    REFERMEMO,
+    PHOTOMEMO
+  ))
+
+exped_tidy_clean <- exped_tidy %>%
+  select(-c(
+    ROUTE2,
+    ROUTE3,
+    ROUTE4,
+    ASCENT1,
+    ASCENT2,
+    ASCENT3,
+    ASCENT4,
+    COUNTRIES,
+    APPROACH,
+    SKI,
+    PARAPENTE,
+    TERMNOTE,
+    OTHERSMTS,
+    CAMPSITES,
+    ROUTEMEMO,
+    ACHIEVMENT,
+    PRIMMEM,
+    PRIMID
+  ))
+```
+
+```{r}
+
+# 1. Compute % missing per column
+miss_pct <- exped_tidy_clean %>% 
+  summarise_all(~ mean(is.na(.)) * 100) %>% 
+  pivot_longer(everything(), names_to = "variable", values_to = "pct_missing")
+
+# 2. Filter for columns with > 0% missing values
+miss_pct_filtered <- miss_pct %>% 
+  filter(pct_missing > 0)
+
+# 3. Plot
+miss_pct_filtered %>% 
+  ggplot(aes(x = pct_missing, y = fct_reorder(variable, pct_missing))) +
+  geom_col() +
+  labs(
+    x = "% missing",
+    y = NULL,
+    title = "Missing values per variable in exped_tidy_clean (only > 0%)"
+  ) +
+  scale_x_continuous(expand = expansion(mult = c(0, .05)))
+
+```
+
+```{r}
+ggplot(peaks_tidy, aes(x = HIMAL_FACTOR)) +
+  geom_bar() +
+  coord_flip() +
+  labs(title = "Distribution of Peaks by HIMAL_FACTOR",
+       x = "HIMAL Factor",
+       y = "Count") +
+  theme_minimal()
+```
+
+```{r}
+annapurna_peaks <- peaks_tidy %>%
+  filter(HIMAL_FACTOR == "Annapurna")
+
+print(annapurna_peaks)
+```
+
+```{r}
+nan_percent <- mean(is.na(exped_tidy$ACCIDENTS)) * 100
+cat("Percentage of NA values in ACCIDENT column:", round(nan_percent, 2), "%\n")
+```
+
+```{r}
+view(exped_tidy)
+view(exped_temp)
+```
+
+```{r}
+# Check for duplicated values in ASCENT1
+duplicated_ascent1 <- exped_tidy %>%
+  filter(!is.na(ASCENT1)) %>%     # remove NAs
+  group_by(ASCENT1) %>%
+  filter(n() > 1) %>%
+  arrange(ASCENT1)
+
+# View the duplicated entries
+print(duplicated_ascent1)
+```
+
+### Supplemental Oxygen: How does the use of oxygen affect the likelihood of success?
+
+```{r}
+exped_oxygen <- exped_tidy_clean %>%
+  mutate(SUCCESS = SUCCESS1 | SUCCESS2 | SUCCESS3 | SUCCESS4) %>%
+  filter(!is.na(O2USED) & !is.na(SUCCESS))
+
+```
+
+```{r}
+ggplot(exped_oxygen, aes(x = O2USED, fill = SUCCESS)) +
+  geom_bar(position = "fill") +
+  labs(y = "Proportion", title = "Success Rate by Oxygen Use")
+
+```
+
+```{r}
+succes <- exped_oxygen %>%
+  filter(SUCCESS)
+
+print(succes)
+```
+
+```{r}
+exped_oxygen %>%
+  specify(SUCCESS ~ O2USED, SUCCESS = "TRUE") %>%
+  hypothesize(null = "independence") %>%
+  generate(reps = 1000, type = "permute") %>%
+  calculate(stat = "diff in props", order = c("TRUE", "FALSE")) %>%
+  visualize()
+
+```
+
+```{r}
+log_spec <- logistic_reg() %>% set_engine("glm")      S
+log_fit <- log_spec %>% fit(success ~ O2USED, data = exped_oxygenS)
+
+```
+
+```{r}
+obs_stat <- exped_oxygen %>%
+  specify(success ~ O2USED, success = "TRUE") %>%
+  calculate(stat = "diff in props", order = c("TRUE", "FALSE"))
+
+null_dist <- exped_oxygen %>%
+  specify(success ~ O2USED, success = "TRUE") %>%
+  hypothesize(null = "independence") %>%
+  generate(reps = 1000, type = "permute") %>%
+  calculate(stat = "diff in props", order = c("TRUE", "FALSE"))
+
+null_dist %>%
+  visualize() +
+  shade_p_value(obs_stat, direction = "greater")
+
+```
+
+```{r}
+library(tidymodels)
+
+log_spec <- logistic_reg() %>%
+  set_engine("glm")
+
+log_fit <- log_spec %>%
+  fit(success ~ O2USED, data = exped_oxygen)
+
+summary(log_fit$fit)
+
+```
+
+## regression on height to the summit
+
+```{r}
+# Count and print the number of HIGHPOINT = NaN and HIGHPOINT = 0
+num_nan <- exped_tidy_clean %>%
+  left_join(peaks_tidy_clean, by = "PEAKID") %>%
+  filter(is.na(HIGHPOINT)) %>%
+  nrow()
+
+num_zero <- exped_tidy_clean %>%
+  left_join(peaks_tidy_clean, by = "PEAKID") %>%
+  filter(HIGHPOINT == 0) %>%
+  nrow()
+
+cat("Number of cases with HIGHPOINT = NaN:", num_nan, "\n")
+cat("Number of cases with HIGHPOINT = 0:", num_zero, "\n")
+```
+
+```{r}
+library(tidymodels)
+# Merge and calculate height_remaining
+exped_full <- exped_tidy_clean %>%
+  left_join(peaks_tidy_clean, by = "PEAKID") %>%
+  filter(HIGHPOINT != 0) %>%
+  mutate(height_remaining = HEIGHTM - HIGHPOINT)
+
+# Optional: View the result
+exped_full %>%
+  select(height_remaining, SUCCESS1)
+
+
+
+```
+
+```{r}
+# 1. Create a train-test split
+set.seed(1)  # For reproducibility
+split <- initial_split(exped_full, prop = 0.7)
+train_data <- training(split)
+test_data  <- testing(split)
+
+# Remove HIGHPOINT and Height
+#train_data_filtered <- train_data |> select(-HIGHPOINT, -HEIGHTM)
+
+
+# 2. Define a linear regression model using parsnip
+lin_mod <- linear_reg() |> set_engine("lm")
+
+# 3. Fit the model
+# Let's say you want to predict height_remaining using HIGHPOINT and maybe other features like year, season, etc.
+lm_fit_all <- lin_mod |>
+  fit(height_remaining ~ SEASON_FACTOR + YEAR + PEAKID, data = train_data)
+
+# 4. See model summary
+lm_fit |> extract_fit_engine() |> summary()
+
+# 5. Check assumptions
+library(performance)
+lm_fit |> extract_fit_engine() |> check_model()
+
+# 6. Predict on test data
+preds <- predict(lm_fit, new_data = test_data)
+head(preds)
+
+# Or use augment to get residuals and fitted values
+augmented <- augment(lm_fit, new_data = test_data)
+head(augmented)
+
+```
+
+```{r}
+# Get factor level counts for training and testing data
+train_levels <- sapply(train_data_filtered, function(x) {
+  if (is.factor(x)) length(unique(x)) else NA
+}) |> na.omit()
+
+test_levels <- sapply(test_data, function(x) {
+  if (is.factor(x)) length(unique(x)) else NA
+}) |> na.omit()
+
+# Combine into a comparison table
+level_comparison <- data.frame(
+  Variable = names(train_levels),
+  Train_Levels = as.integer(train_levels),
+  Test_Levels = as.integer(test_levels[names(train_levels)]),
+  row.names = NULL
+)
+
+# Show result
+level_comparison
+
+```
+
+```{r}
+head(exped_full)
+```
