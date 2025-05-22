@@ -207,6 +207,8 @@ head(exped_tidy)
 head(peaks_tidy)
 ```
 
+exploring the number of shipments by year, we realised that shipments started to increase exponentially from around the year 2000. therefore we decided to look at the data from this date onwards
+
 ```{r}
 ggplot(exped_temp, aes(x = as.numeric(YEAR))) +
   geom_bar() +
@@ -683,19 +685,16 @@ We applied standard scaling to all continuous numeric variables, transforming th
 We excluded logical and categorical variables from this process.
 
 ```{r}
-# Identify variables to transform based on right skew
-right_skewed_vars <- c("SMTDAYS", "TOTDAYS", "CAMPS", "ROPE", "TOTMEMBERS",
-                       "SMTMEMBERS", "MDEATHS", "TOTHIRED", "SMTHIRED", "HDEATHS")
+# Identify right-skewed predictors (excluding HIGHPOINT)
+right_skewed_vars <- c(
+  "SMTDAYS", "TOTDAYS", "CAMPS", "ROPE", 
+  "TOTMEMBERS", "SMTMEMBERS", "MDEATHS", 
+  "TOTHIRED", "SMTHIRED", "HDEATHS"
+)
 
-# Apply log1p() transformation for right-skewed variables
+# Apply log1p transformation to selected predictors only
 exped_full <- exped_full |>
   mutate(across(all_of(right_skewed_vars), log1p))
-
-# OPTIONAL: Reflect and transform HIGHPOINT if skew is very strong
-# Only do this if you confirm it improves the distribution
-max_highpoint <- max(exped_full$HIGHPOINT, na.rm = TRUE)
-exped_full <- exped_full |>
-  mutate(HIGHPOINT = log1p(max_highpoint - HIGHPOINT))
 ```
 
 ```{r}
@@ -717,7 +716,7 @@ numeric_vars <- names(exped_full)[sapply(exped_full, is.numeric)]
 # Exclude vars we don't want to scale
 to_exclude <- c("SUCCESS1", "O2USED", "O2CLIMB", "O2DESCENT", "O2SLEEP",
                 "O2MEDICAL", "O2TAKEN", "O2UNKWN", "NOHIRED",
-                "SEASON", "HOST", "TERMREASON", "REGION", "PHOST", "PSTATUS", "HIMAL")
+                "SEASON", "HOST", "TERMREASON", "REGION", "PHOST", "PSTATUS", "HIMAL", "HIGHPOINT")
 
 vars_to_scale <- setdiff(numeric_vars, to_exclude)
 
@@ -836,15 +835,21 @@ ggplot(exped_full, aes(y = TOTDAYS)) +
 
 ## Modeling
 
+After conducting a detailed exploratory data analysis on some interesting features of our datasets, we now move to the modeling phase. The goal of this section is to address key questions regarding expedition outcomes using statistical models introduced during the course.
+
+The exploratory phase revealed several factors that may influence expedition success, such as the use of supplementary oxygen, the hosting country, the season, duration, and peak altitude. However, to rigorously assess the impact of each variable, we need to build models that can isolate and quantify these effects.
+
 ### Regression
 
 #### 1. Does the use of supplementary oxygen reduce the duration of expeditions?
 
-We aim to understand whether the use of supplementary oxygen (`O2USED`) has a measurable impact on the total duration of Himalayan expeditions (`TOTDAYS`). This is a regression problem, where the response variable is continuous.
+In this section, we aim to investigate whether the use of supplementary oxygen (`O2USED`) has a measurable effect on the total duration of Himalayan expeditions (`TOTDAYS`). This is a regression problem, as the response variable is continuous.
 
-The variable `O2USED` is binary (TRUE/FALSE), and our hypothesis is that expeditions using oxygen may be shorter due to improved endurance at altitude. Confirming this relationship can provide insight into the logistical and physiological effects of oxygen use.
+The variable `O2USED` is binary (`TRUE`/`FALSE`), indicating whether oxygen was used during the expedition. Our working hypothesis is that expeditions using oxygen may have shorter durations, as supplementary oxygen could improve endurance and reduce fatigue at high altitudes.
 
-We will begin with exploratory inference, then fit a linear regression model.
+Understanding this relationship could offer valuable insights into the logistical and physiological implications of oxygen use in high-altitude mountaineering.
+
+We begin with some exploratory visualizations and summary statistics, and then fit a linear regression model to test the association between oxygen use and expedition duration.
 
 ```{r}
 exped_full %>%
@@ -857,7 +862,13 @@ exped_full %>%
   )
 ```
 
-Boxplot
+We observe that:
+
+-   Expeditions **without oxygen** (`O2USED = FALSE`) had a **mean duration** of approximately **-0.18** and a **median** of about **0.15**
+
+-   Expeditions **with oxygen** (`O2USED = TRUE`) had a **mean duration** of about **0.34** and a **median** of **0.77**
+
+Now let's see it in a graphically way:
 
 ```{r}
 ggplot(exped_full, aes(x = O2USED, y = TOTDAYS, fill = O2USED)) +
@@ -868,6 +879,10 @@ ggplot(exped_full, aes(x = O2USED, y = TOTDAYS, fill = O2USED)) +
   theme_minimal()
 
 ```
+
+The boxplot confirms the trend observed in the summary statistics:\
+
+**Expeditions using supplementary oxygen tend to last longer** than those that don’t.
 
 To statistically assess whether supplementary oxygen affects expedition duration, we test the following hypotheses:
 
@@ -880,11 +895,13 @@ We use a two-sample Welch's t-test (unequal variance assumed).
 t.test(TOTDAYS ~ O2USED, data = exped_full, var.equal = FALSE)
 ```
 
-t-test
+We performed a Welch two-sample t-test to compare the average expedition duration between groups using and not using supplementary oxygen.
 
-```{r}
-wilcox.test(TOTDAYS ~ O2USED, data = exped_full)
-```
+-    The test yields a **highly significant result** (p-value \< 2.2e-16), with a **95% confidence interval** for the difference in means between **-0.56 and -0.47**.
+
+-    This confirms that there is a **statistically significant difference** in average duration between the two groups.
+
+Interestingly, expeditions **using oxygen actually last longer** on average, contradicting the idea that oxygen shortens climbs. This likely reflects that oxygen is more often used on longer, more demanding expeditions.
 
 ```{r}
 # Bootstrap difference in means
@@ -900,7 +917,28 @@ get_confidence_interval(oxygen_infer, level = 0.95, type = "percentile")
 # Plot the bootstrap distribution
 visualize(oxygen_infer) +
   geom_vline(xintercept = mean(oxygen_infer$stat), linetype = "dashed")
+
+
 ```
+
+To confirm the result from the t-test, we applied a bootstrap approach to estimate the difference in mean expedition duration between the two groups (`O2USED = TRUE` vs `FALSE`).
+
+The simulated bootstrap distribution is centered around **0.50**, reinforcing the finding that expeditions using supplementary oxygen tend to be longer.
+
+This non-parametric method supports the conclusion that the observed difference is not due to random variation.
+
+**Linear Regression**
+
+We model the total expedition duration as:
+
+$$
+\text{TOTDAYS} = \beta_0 + \beta_1 \cdot \text{O2USED}
+$$
+
+Where:
+
+-   $\beta_0$ is the **mean duration** of expeditions **without supplementary oxygen** (`O2USED = FALSE`)
+-   $\beta_1$ is the **average difference in duration** between expeditions that **used oxygen** and those that did not
 
 We model the total duration of expeditions (`TOTDAYS`) as a function of oxygen use (`O2USED`), using simple linear regression.
 
@@ -928,27 +966,35 @@ exped_full %>%
   metrics(truth = TOTDAYS, estimate = pred)
 ```
 
-The coefficient for `O2USED` represents the estimated average change in duration when oxygen is used.
+The linear regression confirms that expeditions using supplementary oxygen are, on average, **0.51 standard units longer** than those that do not—holding all else constant. This effect is statistically significant (*p* \< 0.001).
 
-If the coefficient is negative and statistically significant (p \< 0.05), this suggests that expeditions using supplementary oxygen are shorter on average.
+However, the model’s R² is **very low (\~0.06)**, meaning oxygen use alone explains only a small portion of the variation in expedition duration. This suggests that many other factors likely influence duration, which this simple model does not capture, for this reason, a simple linear regression is not sufficient to capture the complexity behind the duration of a successful expedition.
 
-We also assess the model’s R² value to determine how much of the variation in duration is explained by oxygen use alone. Since this is a simple model, we expect a relatively low R², which is acceptable for initial inference.
-
-The residual plots are used to check for any major violations of the linear model assumptions (homoscedasticity, normality of residuals).
+The residual plots show some deviation from ideal assumptions, especially regarding homoscedasticity and normality. Despite this, the model is still useful as an initial approximation of the association.
 
 #### 2. Which features help expeditions reach the summit?
 
-We aim to understand which features are most predictive of expedition performance, measured by the highest altitude reached (`HIGHPOINT`). This is a regression task with a continuous target.
+In this section, we aim to understand which factors are most strongly associated with the performance of mountaineering expeditions, measured by the highest point reached (`HIGHPOINT`). This is a regression task with a continuous response variable.
 
-We include multiple predictors: team size, oxygen use, season, country hosting, rope used, number of camps, and more.
+Unlike the previous question, here we include multiple predictors to account for the complexity of an expedition. These include:
 
-We fit both a linear regression model and a LASSO regression to evaluate the importance of features and potentially perform variable selection.
+-    Team size (`TOTMEMBERS`, `SMTMEMBERS`)
+
+-    Hired staff (`TOTHIRED`, `SMTHIRED`)
+
+-    Use of supplementary oxygen (`O2USED`, `O2CLIMB`)
+
+-    Climbing season (`SEASON`)
+
+-    Hosting country (`HOST`)
+
+-    Logistic factors such as camps, ropes, and support metrics (`CAMPS`, `ROPE`, `COMRTE`, `STDRTE`)
 
 ```{r}
 # Filter only complete cases for modeling
 model_data <- exped_full %>%
   select(HIGHPOINT, O2USED, TOTMEMBERS, SMTMEMBERS, TOTHIRED, SMTHIRED, O2CLIMB, 
-         SEASON, HOST, CAMPS, ROPE, COMRTE, STDRTE) %>%
+         SEASON, HOST, CAMPS, ROPE, COMRTE, STDRTE, HOST_FACTOR) %>%
   drop_na()
 ```
 
@@ -961,22 +1007,52 @@ ggplot(model_data, aes(x = HIGHPOINT)) +
   theme_minimal()
 ```
 
-We now test whether oxygen usage (`O2USED`) significantly impacts `HIGHPOINT`, using a t-test.
+### Exploring the Target Variable
+
+We begin by exploring the distribution of the outcome variable `HIGHPOINT`, which represents the highest altitude reached during an expedition. The histogram shows a bimodal and skewed pattern:
+
+-    A large number of expeditions reach very low altitudes (left side), possibly indicating early turnarounds or failures.
+
+-    The right tail represents expeditions that approached or reached the summit, with noticeable peaks near 7000–8000 meters.
+
+**Does oxygen use affect highpoint?**
+
+To assess whether the use of supplementary oxygen has a significant effect on expedition performance, we tested for a difference in `HIGHPOINT` between groups that used oxygen and those that did not.
 
 -   **Null hypothesis (H₀)**: The mean HIGHPOINT is the same across groups.
 
--   **Alternative hypothesis (H₁**: The mean HIGHPOINT differs between groups.
+-   **Alternative hypothesis (H₁)**: The mean HIGHPOINT differs between groups.
+
+We used a **Welch two-sample t-test**, allowing for unequal variances. The test provides statistical evidence on whether the use of oxygen is associated with higher or lower summit outcomes.
 
 ```{r}
 t.test(HIGHPOINT ~ O2USED, data = model_data)
 ```
 
-For multi-level categorical variables like `SEASON_FACTOR`, we use ANOVA.
+-   **Result**: The difference is highly significant (*p* \< 2.2e-16).
+
+-   Expeditions that used oxygen reached a **much higher average altitude**\
+    (mean = **8465.73 m**)\
+    compared to those that did not (mean = **6439.17 m**).
+
+-   The 95% confidence interval for the difference in means is approximately **[1969.9, 2083.2] meters**
+
+This suggests that oxygen use is **strongly associated with better expedition performance**, likely due to its physiological benefits at extreme altitudes.
 
 ```{r}
 aov_result <- aov(HIGHPOINT ~ SEASON, data = model_data)
 summary(aov_result)
 ```
+
+#### Does season matter?
+
+To investigate whether the time of year influences expedition outcomes, we performed a one-way ANOVA on `HIGHPOINT` across different seasons.
+
+-    **Result:** The effect of `SEASON` on `HIGHPOINT` is highly significant (*p* \< 2.2e–16)
+
+-   This suggests that the season during which an expedition takes place has a measurable influence on how high expeditions typically go.
+
+-   This result supports the inclusion of `SEASON` as a meaningful predictor in the regression models.
 
 ```{r}
 oxygen_ci <- model_data %>%
@@ -990,24 +1066,42 @@ visualize(oxygen_ci) +
   geom_vline(xintercept = mean(oxygen_ci$stat), linetype = "dashed")
 ```
 
-check the correlations
+To further validate the t-test results regarding oxygen use, we ran a **bootstrap simulation** of the difference in means between expeditions that used and did not use supplementary oxygen.
+
+The resulting distribution confirmed a **consistently positive difference**, with the entire 95% confidence interval above zero.\
+This reinforces our previous conclusion that expeditions using oxygen tend to reach **significantly higher altitudes**.
 
 ```{r}
-# Correlation matrix
-model_data %>%
-  cor(use = "complete.obs") %>% 
-  ggcorrplot::ggcorrplot(lab = TRUE)
-
-# ANOVA: HIGHPOINT ~ SEASON_FACTOR
-anova1 <- aov(HIGHPOINT ~ SEASON, data = model_data)
-summary(anova1)
-
 # Boxplot by HOST
-ggplot(model_data, aes(x = HOST, y = HIGHPOINT)) +
+ggplot(model_data, aes(x = factor(HOST_FACTOR), y = HIGHPOINT)) +
   geom_boxplot()
 ```
 
-train test split
+We examined the role of the expedition host country (`HOST_FACTOR`) on performance, measured by `HIGHPOINT`. The boxplot below shows the distribution of altitudes reached for expeditions hosted by China, India, Nepal, or Unknown regions.
+
+-    Expeditions hosted by **China** and **Nepal** generally reach higher altitudes, with **China** showing the highest median `HIGHPOINT`.
+
+-    **India** displays a slightly lower median and a narrower range of outcomes.
+
+-    Expeditions with **Unknown** host information show a more moderate distribution.
+
+These differences suggest that the host country may reflect not only geographic access but also logistical, regulatory, or seasonal factors that influence expedition success. Based on this, `HOST_FACTOR` is a meaningful categorical variable to include in the regression models.
+
+```{r}
+model_data %>%
+  dplyr::select(where(is.numeric)) %>%
+  cor(use = "complete.obs") %>%
+  ggcorrplot::ggcorrplot(lab = TRUE)
+
+```
+
+correlation matrix was computed to assess linear relationships between all numeric predictors and the target variable `HIGHPOINT`.
+
+Overall, these findings motivate the use of a standard **multiple linear regression model** to assess direction and significance of coefficients, and a **LASSO regression** to deal with multicollinearity and perform feature selection in a more robust way.
+
+**Multiple linear regression and LASSO regression model**
+
+We trea
 
 ```{r}
 set.seed(42)
@@ -1016,7 +1110,11 @@ train_data <- training(split)
 test_data  <- testing(split)
 ```
 
-again we implement a basic Linear Regression
+To better understand which features contribute to higher performance, we fit two models:
+
+1.   A **multiple linear regression** to interpret coefficient effects.
+
+2.  A **LASSO regression** to evaluate feature importance and perform variable selection.
 
 ```{r}
 lm_model <- linear_reg() %>%
@@ -1036,6 +1134,16 @@ pred_lm <- predict(lm_fit, test_data) %>% bind_cols(test_data)
 metrics(pred_lm, truth = HIGHPOINT, estimate = .pred)
 ```
 
+Model performance on the test set:
+
+-    **RMSE**: 1370.5 meters
+
+-   **R²**: 0.5
+
+-   **MAE**: 762.7 meters
+
+This indicates that the model explains around **52% of the variance** in the maximum altitude reached, which is reasonably good given the complexity and variability of real-world expeditions.
+
 and then we do a residual check
 
 ```{r}
@@ -1044,7 +1152,14 @@ lm_fit %>%
   check_model()
 ```
 
+**Normality of residuals** is moderately violated, with noticeable skew in the Q-Q plot.
+
 Now we can implement a LASSO regression
+
+```{r}
+exped_full <- exped_full |>
+  mutate(HIGHPOINT_SCALED = scale(HIGHPOINT))
+```
 
 ```{r}
 lasso_model <- linear_reg(penalty = tune(), mixture = 1) %>%
@@ -1094,12 +1209,17 @@ pred_lasso <- predict(final_lasso, test_data) %>%
 metrics(pred_lasso, truth = HIGHPOINT, estimate = .pred)
 ```
 
-We now compare performance between:
+To improve model interpretability and reduce the risk of overfitting, we implemented a **LASSO regression**. This method applies L1 regularization, which can shrink less important coefficients to zero, effectively performing variable selection.
 
--   Linear regression (baseline)
--   LASSO (regularized, with feature selection)
+We scaled the target variable (`HIGHPOINT`) and performed 5-fold cross-validation to tune the penalty parameter (`λ`), selecting the value that minimized RMSE.
 
-We compare based on RMSE and R². LASSO may provide better generalization and help identify key features by shrinking coefficients of irrelevant predictors to zero.
+Model performance on the test set:
+
+-    **RMSE**: 1371.1 meters
+
+-   **R²**: 0.519
+
+-    **MAE**: 761.8 meters
 
 ```{r}
 final_lasso %>%
@@ -1108,9 +1228,13 @@ final_lasso %>%
   filter(estimate != 0)
 ```
 
-LASSO regression helps identify the most relevant predictors for expedition performance, while potentially improving generalization compared to ordinary least squares.
+The LASSO regression retained several key predictors, including oxygen use, number of camps, and summit team size.
 
-We interpret which variables are retained and compare their effects to those in the baseline linear model.
+The size and direction of the coefficients provide insight into each variable's impact on expedition success (measured by HIGHPOINT).
+
+For example, **using supplementary oxygen** and **setting up more camps** are strongly associated with **reaching higher altitudes**, while **larger teams** may slightly reduce performance.
+
+Since both models are linear and the dataset contains a manageable number of informative predictors, their performance is almost identical. LASSO did not substantially outperform the standard linear regression, but it confirms the same key variables while providing a slightly more regularized model
 
 ### Classification
 
@@ -1150,7 +1274,9 @@ ggplot(data_season, aes(x = SEASON_FACTOR, fill = SUCCESS1)) +
   labs(title = "Success Rate by Season", y = "Proportion")
 ```
 
-We test whether there is a significant difference in success rates between summer and spring expeditions.
+The bar plot above illustrates the proportion of successful and unsuccessful expeditions for the **Spring** and **Autumn** seasons. While success appears slightly more frequent in **Spring**, the difference is relatively subtle.
+
+This visualization motivates the need for a formal statistical test (e.g., **logistic regression**) to determine whether the observed difference is statistically significant.
 
 -   **Null Hypothesis (H0)**: The probability of success is the same in both seasons.
 -   **Alternative Hypothesis (H1)**: The probability of success differs between summer and spring.
@@ -1168,6 +1294,14 @@ visualize(infer_test) +
   labs(title = "Bootstrap CI: Spring vs Autumn Success Rate")
 ```
 
+We use **bootstrap resampling** to estimate the 95% confidence interval for the **difference in success proportions** between autumn and spring expeditions.
+
+The statistic of interest is the difference in porportions between Autumn and Spring.
+
+From the plot, the entire confidence interval lies **below zero**, suggesting that the difference is statistically significant at the 5% level. This reinforces the conclusion that **autumn expeditions are less likely to succeed** than spring ones.
+
+We now split the dataset and prepare it for the logistic regression
+
 ```{r}
 set.seed(123)
 split_season <- initial_split(data_season, prop = 0.8)
@@ -1180,7 +1314,7 @@ rec_season <- recipe(SUCCESS1 ~ ., data = train_season) %>%
   step_dummy(all_nominal_predictors(), one_hot = TRUE)
 ```
 
-Logistic Regression
+**Logistic Regression**
 
 ```{r}
 
@@ -1206,6 +1340,14 @@ metrics(log_preds, truth = SUCCESS1, estimate = .pred_class)
 
 ```
 
+We fit a **logistic regression** to predict the probability of expedition success (`SUCCESS1`) based on predictors such as **season**, **team size**, **oxygen use**, and **rope usage**, focusing only on **spring** and **autumn** expeditions.
+
+We evaluate model performance on the test set using two metrics:
+
+-   **Accuracy**: 0.699 — This means the model correctly predicts success or failure about 70% of the time
+
+These results suggest that season, along with a few other predictors, offers **some discriminatory power** for predicting expedition success, but there’s still **room for improvement**, perhaps using non-linear models or additional variables.
+
 ```{r}
 # Confusion matrix
 conf_mat(log_preds, truth = SUCCESS1, estimate = .pred_class) %>%
@@ -1221,6 +1363,10 @@ log_preds %>%
   ggtitle("ROC Curve - Logistic Regression")
 
 ```
+
+The **confusion matrix** reveals a reasonable balance between correctly classified successes and failures, although there are some false positives and false negatives.
+
+The **ROC curve** shows moderate discriminatory power. While the model is better than random guessing, its predictive performance could be improved with additional features or more complex models.
 
 ```{r}
 # Naive Bayes (Optional Comparison)
@@ -1254,12 +1400,19 @@ conf_mat(nb_preds, truth = SUCCESS1, estimate = .pred_class) %>%
   labs(title = "Confusion Matrix - Naive Bayes")
 ```
 
--   A significant difference in success rates between summer and spring was tested using a bootstrap method.
--   Logistic regression provides a clear estimate of the effect of seasonality on success.
--   Naive Bayes was added for comparison as an interpretable probabilistic classifier.
--   Confusion matrix and AUC were used to evaluate performance.
+As an additional comparison, we applied a Naive Bayes classifier to predict expedition success based on the season. This probabilistic model assumes feature independence and is often used as a simple yet effective baseline in classification tasks.
 
-This analysis helps understand how timing of expeditions influences the likelihood of reaching the summit.
+The confusion matrix shows a higher number of false positives and false negatives compared to logistic regression, indicating slightly lower predictive performance. However, Naive Bayes still captures the overall trend that **spring expeditions are more likely to succeed than autumn ones**.
+
+We tested whether expedition success differs between spring and autumn.
+
+-    **Bootstrap simulation** confirmed a small but statistically significant difference in success rate, with spring expeditions being slightly more successful.
+
+-   **Logistic regression** achieved \~70% accuracy, suggesting season alone carries moderate predictive power.
+
+-   **Naive Bayes**, though slightly less accurate (65%), supports the same conclusion.
+
+**Takeaway**: While seasonality matters, it's not the sole driver of success. Other factors like team size, oxygen use, and route likely play substantial roles.
 
 #### 4. Does the use of supplementary oxygen increase the probability of success?
 
@@ -1277,14 +1430,15 @@ data_cls <- exped_full %>%
 ```
 
 ```{r}
-data_cls <- data_cls %>%
-  mutate(SUCCESS1 = as.factor(SUCCESS1))
-```
-
-```{r}
 data_cls %>%
   group_by(O2USED) %>%
   summarise(success_rate = mean(SUCCESS1), count = n())
+```
+
+```{r}
+data_cls <- data_cls %>%
+  mutate(SUCCESS1 = as.factor(SUCCESS1))
+
 ```
 
 ```{r}
@@ -1293,6 +1447,10 @@ ggplot(data_cls, aes(x = O2USED, fill = SUCCESS1)) +
   scale_y_continuous(labels = scales::percent) +
   labs(title = "Success rate by Oxygen Usage", y = "Proportion")
 ```
+
+The bar plot shows the distribution of expedition outcomes (`SUCCESS1`) split by oxygen use (`O2USED`). Each bar is scaled proportionally, allowing us to directly compare success rates between groups.
+
+-    Expeditions that **used supplementary oxygen** (`O2USED = TRUE`) show a **substantially higher proportion of success** compared to those that did not.
 
 To statistically evaluate the effect of supplementary oxygen on success rate, we formulate the following hypotheses:
 
@@ -1313,6 +1471,10 @@ get_confidence_interval(oxygen_boot, level = 0.95, type = "percentile")
 visualize(oxygen_boot)
 ```
 
+Expeditions using supplementary oxygen have a **substantially and significantly higher probability** of reaching the summit. The evidence supports rejecting the null hypothesis of equal success rates.
+
+Now again let's split the dataset and prepare it for the logistic regression
+
 ```{r}
 set.seed(123)
 split_cls <- initial_split(data_cls, prop = 0.8)
@@ -1326,7 +1488,7 @@ step_dummy(all_nominal_predictors(), one_hot = TRUE)
 
 ```
 
-Logistic Regression Model
+**Logistic Regression Model**
 
 ```{r}
 log_model <- logistic_reg() %>%
@@ -1340,7 +1502,7 @@ log_wf <- workflow() %>%
 log_fit <- fit(log_wf, data = train_cls)
 ```
 
-Evaluate Logistic Regression
+**Evaluate Logistic Regression**
 
 ```{r}
 log_preds <- predict(log_fit, test_cls, type = "prob") %>%
@@ -1351,6 +1513,12 @@ metrics(log_preds, truth = SUCCESS1, estimate = .pred_class)
 conf_mat(log_preds, truth = SUCCESS1, estimate = .pred_class)
 roc_auc(log_preds, truth = SUCCESS1, .pred_TRUE)
 ```
+
+#### Model Evaluation
+
+-    **Accuracy**: 0.99
+
+These metrics suggest **excellent predictive performance**. The model is highly accurate at classifying whether an expedition will succeed based on oxygen use.
 
 ```{r}
 # Metrics and confusion matrix for logistic regression
@@ -1367,8 +1535,6 @@ conf_mat(log_preds, truth = SUCCESS1, estimate = .pred_class) %>%
   labs(title = "Confusion Matrix – Logistic Regression")
 ```
 
-ROC Curve
-
 ```{r}
 log_preds %>%
   roc_curve(truth = SUCCESS1, .pred_TRUE) %>%
@@ -1376,7 +1542,7 @@ log_preds %>%
   ggtitle("ROC Curve – Logistic Regression")
 ```
 
-Random Forest Comparison
+Now let's implement a Random Forest model for the comparison
 
 ```{r}
 rf_model <- rand_forest(trees = 500) %>%
@@ -1397,21 +1563,7 @@ metrics(rf_preds, truth = SUCCESS1, estimate = .pred_class)
 roc_auc(rf_preds, truth = SUCCESS1, .pred_TRUE)
 ```
 
--   Logistic regression provides insight into how oxygen use correlates with summit success.
--   The `infer` test and bootstrap CI help support or reject the null hypothesis.
--   Random forest may offer better predictive performance but is less interpretable.
-
-From this, we determine whether `O2USED` significantly improves the probability of success, and how predictive it is when combined with other features.
-
--   The bootstrap confidence interval from the `infer` package helps confirm whether the observed difference in success rates is statistically significant.
-
--   The logistic regression model provides direct insight into the effect of oxygen usage on success.
-
--   The **confusion matrix** shows how well the model distinguishes between successful and unsuccessful expeditions.
-
--   The **ROC curve and AUC** quantify the model’s ability to separate the two classes across thresholds.
-
-Together, these results help us assess whether supplementary oxygen is a statistically and practically significant factor in expedition success.
+Both the logistic regression and the random forest model showed excellent performance in predicting expedition success, with very high accuracy and agreement. The results clearly suggest that using supplementary oxygen significantly increases the probability of a successful climb.
 
 #### 5. **Are expeditions hosted by Nepal or China more likely to succeed?**
 
@@ -1427,7 +1579,9 @@ table(exped_full$SUCCESS1)
 prop.table(table(exped_full$SUCCESS1))
 ```
 
-We check class balance to understand if the dataset is imbalanced. A strongly skewed target may require additional metrics (e.g., precision/recall), but for now we focus on accuracy, AUC, and confusion matrix.
+We begin by checking the distribution of the target variable, `SUCCESS1`. The success rate is relatively balanced, with approximately 58% of expeditions being successful. This indicates we can proceed with standard classification metrics without needing to address severe class imbalance.
+
+Next, we subset the data to focus only on expeditions hosted by **Nepal** or **China**, as these are the two countries we are comparing. We also remove missing values and drop unused factor levels to ensure a clean dataset for modeling.
 
 ```{r}
 # Subset relevant variables
@@ -1463,11 +1617,11 @@ We test if success rates differ significantly between expeditions led by Nepal o
 -   **Null Hypothesis (H₀)**: All countries have the same success rate.
 -   **Alternative Hypothesis (H₁)**: At least one country differs in success rate.
 
-We use ANOVA and `infer` to support this inference.
-
 ```{r}
 chisq.test(table(data_cls$HOST_FACTOR, data_cls$SUCCESS1))
 ```
+
+A **Chi-squared test** yielded a significant p-value (p = 0.00127), suggesting the host country is associated with differing success rates.
 
 ```{r}
 data_host_pair <- data_cls %>%
@@ -1489,10 +1643,11 @@ visualize(inference_host) +
   geom_vline(xintercept = diff(obs_diff$prop_success), linetype = "dashed")
 ```
 
-```{r}
-get_p_value(inference_host, obs_stat = diff(obs_diff$prop_success), direction = "two_sided")
+The dashed vertical line represents the **observed difference in success rates** between expeditions led by Nepal and China. Since this observed value lies **far in the tail** of the simulated null distribution, it suggests that such a difference is **unlikely to occur by chance**.
 
-```
+This supports the conclusion that **expedition success is significantly associated with host country**, with China-led expeditions showing a higher success rate.
+
+Again let's implement all the pipeline for the logistic regression model
 
 ```{r}
 set.seed(123)
@@ -1506,7 +1661,7 @@ cls_recipe <- recipe(SUCCESS1 ~ ., data = train_cls) %>%
   step_dummy(all_nominal_predictors(), one_hot = TRUE)
 ```
 
-Logistic Regression Model
+**Logistic Regression Model**
 
 ```{r}
 log_model <- logistic_reg() %>%
@@ -1532,15 +1687,13 @@ log_fit %>%
 
 P-values provide insight into which predictors significantly contribute to the model. A p-value \< 0.05 indicates a statistically significant effect.
 
-Evaluation
+**Evaluation**
 
 ```{r}
 log_preds <- predict(log_fit, test_cls, type = "prob") %>%
   bind_cols(predict(log_fit, test_cls)) %>%
   bind_cols(test_cls)
 ```
-
-Accurarcy
 
 ```{r}
 metrics(log_preds, truth = SUCCESS1, estimate = .pred_class)
@@ -1561,14 +1714,26 @@ log_preds %>%
 roc_auc(log_preds, truth = SUCCESS1, .pred_TRUE)
 ```
 
-This analysis tests whether the host country of an expedition influences its probability of success.
+We then fit a logistic regression model including the host country and additional predictors. While overall model performance was strong (accuracy ≈ 0.99, ROC AUC near 1), the host country itself was **not** a statistically significant predictor (p \> 0.05) once other variables were included.
 
--   Class balance was reasonable for classification.
--   Success rates showed variation across host countries.
--   Chi-squared and bootstrap hypothesis testing confirmed significant differences.
--   Logistic regression revealed the most influential host predictors via p-values.
--   ROC and confusion matrix validated model predictive power.
-
-Together, these insights help us assess how the origin of expedition leadership may affect outcomes in high-altitude mountaineering.
+**Takeaway**: Hosting country shows a difference in success rate when examined in isolation, but this effect becomes negligible in a multivariable context. Other features, such as team size or use of supplementary oxygen, have a stronger influence on expedition success.
 
 ## Conclusion
+
+This project explored key factors influencing expedition success in the Himalayas, using a comprehensive end-to-end data analysis pipeline.
+
+We began with **data cleaning and preprocessing**, addressing missing values, handling high-NA columns, imputing features, removing duplicates, joining datasets, encoding categorical variables, and scaling numerical features. This careful preparation ensured clean, usable data for downstream analysis.
+
+We then investigated five main research questions combining statistical tests and machine learning models:
+
+1.   **Oxygen use** is associated with significantly higher altitudes reached, and groups using supplementary oxygen tend to summit higher.
+
+2.  Both **multiple linear regression** and **LASSO** identified similar predictors of expedition altitude, showing consistent results with comparable performance, likely due to linearity and manageable multicollinearity.
+
+3.  **Seasonality** affects expedition success: expeditions in **spring** had slightly better outcomes than in **autumn**, as confirmed by hypothesis testing and classification models.
+
+4.  **Using oxygen** clearly improves the **probability of success**, confirmed through statistical tests, logistic regression, and classification metrics — with models achieving high accuracy and AUC scores
+
+**The hosting country** (Nepal vs. China) initially showed different success rates, but after adjusting for other variables, the host factor was **not statistically significant** in the logistic model — suggesting that other factors, not the country itself, drive the difference.
+
+Overall, statistical testing combined with predictive modeling provided robust, complementary insights. Some effects observed in univariate analysis disappeared in multivariate contexts, highlighting the value of controlling for multiple expedition factors.
