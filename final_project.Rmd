@@ -1329,17 +1329,13 @@ wf_log <- workflow() %>%
 fit_log <- fit(wf_log, data = train_season)
 ```
 
-Evaluation
-
 ```{r}
-log_metrics <- log_preds %>%
-  metrics(truth = SUCCESS1, estimate = .pred_class) %>%
-  bind_rows(precision(log_preds, truth = SUCCESS1, estimate = .pred_class)) %>%
-  bind_rows(recall(log_preds, truth = SUCCESS1, estimate = .pred_class)) %>%
-  bind_rows(f_meas(log_preds, truth = SUCCESS1, estimate = .pred_class))
-
-log_metrics
+log_preds <- predict(fit_log, test_season, type = "prob") %>%
+  bind_cols(predict(fit_log, test_season)) %>%
+  bind_cols(test_season)
 ```
+
+Evaluation
 
 ```{r}
 log_metrics <- log_preds %>%
@@ -1517,6 +1513,12 @@ log_wf <- workflow() %>%
 log_fit <- fit(log_wf, data = train_cls)
 ```
 
+```{r}
+log_preds <- predict(log_fit, test_cls, type = "prob") %>%
+  bind_cols(predict(log_fit, test_cls)) %>%
+  bind_cols(test_cls)
+```
+
 **Evaluate Logistic Regression**
 
 ```{r}
@@ -1544,9 +1546,6 @@ However, given the data imbalance, these results should be interpreted cautiousl
 log_preds <- predict(log_fit, test_cls, type = "prob") %>%
   bind_cols(predict(log_fit, test_cls)) %>%
   bind_cols(test_cls)
-
-# Accuracy and other metrics
-metrics(log_preds, truth = SUCCESS1, estimate = .pred_class)
 
 # Confusion matrix
 conf_mat(log_preds, truth = SUCCESS1, estimate = .pred_class) %>%
@@ -1578,8 +1577,17 @@ rf_preds <- predict(rf_fit, test_cls, type = "prob") %>%
   bind_cols(predict(rf_fit, test_cls)) %>%
   bind_cols(test_cls)
 
-metrics(rf_preds, truth = SUCCESS1, estimate = .pred_class)
-roc_auc(rf_preds, truth = SUCCESS1, .pred_TRUE)
+```
+
+```{r}
+rf_metrics <- rf_preds %>%
+  metrics(truth = SUCCESS1, estimate = .pred_class) %>%
+  bind_rows(precision(rf_preds, truth = SUCCESS1, estimate = .pred_class)) %>%
+  bind_rows(recall(rf_preds, truth = SUCCESS1, estimate = .pred_class)) %>%
+  bind_rows(f_meas(rf_preds, truth = SUCCESS1, estimate = .pred_class)) %>%
+  bind_rows(roc_auc(rf_preds, truth = SUCCESS1, .pred_TRUE))
+
+rf_metrics
 ```
 
 Both the logistic regression and the random forest model showed excellent performance in predicting expedition success, with very high accuracy and agreement. The results clearly suggest that using supplementary oxygen significantly increases the probability of a successful climb.
@@ -1819,8 +1827,7 @@ The histogram of SUMMIT_GAP shows a right-skewed distribution: most expeditions 
 t.test(SUMMIT_GAP ~ O2USED, data = model_data)
 ```
 
-**Result**: p \< 2.2e-16.
-The Welch t-test shows a highly significant difference (p \< 2.2e-16), with expeditions using supplementary oxygen having a much smaller average summit gap. This suggests oxygen helps expeditions get closer to the summit.
+**Result**: p \< 2.2e-16. The Welch t-test shows a highly significant difference (p \< 2.2e-16), with expeditions using supplementary oxygen having a much smaller average summit gap. This suggests oxygen helps expeditions get closer to the summit.
 
 ### Does season matter?
 
