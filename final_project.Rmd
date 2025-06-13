@@ -249,7 +249,7 @@ The dataset we will use at the end of the data cleaning and preprocessing is a *
 PEAK_TIDY DATASET DESCRIPTION
 
 | Variable | Class | Description |
-|------------------------|------------------------|------------------------|
+|----|----|----|
 | PEAKID | integer | Peak ID, the key field (unique identifier) for each record. |
 | PKNAME | integer | Peak name. |
 | PKNAME2 | integer | Peak name 2. |
@@ -283,7 +283,7 @@ PEAK_TIDY DATASET DESCRIPTION
 EXPED_TIDY DATASET DESCRIPTION
 
 | Variable | Class | Description |
-|------------------------|------------------------|------------------------|
+|----|----|----|
 | EXPID | factor | Expedition ID. |
 | PEAKID | factor | Peak ID. |
 | YEAR | factor | Year of the expedition. |
